@@ -1,0 +1,30 @@
+"""Planted contact signals on the Xenium readouts."""
+import json
+from pathlib import Path
+import numpy as np, scipy.sparse as sp
+
+import os
+from graticcs.paths import XENIUM
+D = XENIUM
+PLANT = [("CD274->PDCD1", "GranzymeB", -1), ("HLA-DRA->CD4", "Ki-67", +1), ("CD86->CD28", "PCNA", +1), ("CD70->CD27", "CYTOTOX", +1), ("CDH1->EGFR", "PROLIF", +1)]
+
+
+BETAS = [0.1, 0.4]
+z = np.load(D / "gt_inputs.npz"); meta = json.load(open(D / "gt_channels.json"))
+names = [c["name"] for c in meta["channels"]]; tnames = meta["prot_readout"] + meta["rna_programs"]
+n = len(z["fold"]); src, dst, con = z["src"], z["dst"], z["contact"]
+ci = con > 0
+A = sp.csr_matrix((np.ones(ci.sum(), np.float32), (dst[ci], src[ci])), shape=(n, n))
+Y0 = np.c_[z["Yp"], z["Yr"]].astype(np.float64)
+expo = {}
+for chn, tgt, sgn in PLANT:
+    c = names.index(chn); L = np.maximum(z["L_mo"][:, c], 0); R = np.maximum(z["R_mo"][:, c], 0)
+    x = R * (A @ L); expo[chn] = (x - x.mean()) / (x.std() + 1e-12)
+    print(f"{chn:22s} -> {tgt:9s} exposed cells {(x > 0).mean():.3f}")
+for b in BETAS:
+    Y = Y0.copy()
+    for chn, tgt, sgn in PLANT:
+        t = tnames.index(tgt); Y[:, t] += sgn * b * Y0[:, t].std() * expo[chn]
+    np.savez_compressed(D / f"spike_beta{b}.npz", Y=Y.astype(np.float32))
+json.dump({"plant": PLANT, "betas": BETAS, "tnames": tnames}, open(D / "spike_meta.json", "w"), indent=1)
+print("saved")

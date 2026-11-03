@@ -1,0 +1,13 @@
+data/
+raw/
+results/
+figures/*.png
+figures/*.pdf
+figures/*.svg
+figures/fig1_stages/
+figures/lit_cases/
+__pycache__/
+*.pt
+*.npz
+*.npy
+*.parquet
