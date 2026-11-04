@@ -83,7 +83,7 @@ parts.append(table(pd.DataFrame([
     ["generic neighbour context in nuisance branch", "0.05%", "absorbs all neighbour effects (over-conservative)", "fold 0"],
     ["receptor proteins kept as readouts", "4.4%", "real share 18.7% vs 16.7% expected; decoys equally predictive", "fold 0"],
     ["receiver receptor features not in nuisance", "11.9%", "decoys equally predictive (receiver self-information)", "fold 0"],
-    ["embedding-based attention and gates (original keys/values)", "6.0% [4.5, 7.3]", "real share 31%; neighbour information smuggled by every channel", "fold 0"],
+    ["embedding-based attention and gates (full-state keys/values)", "6.0% [4.5, 7.3]", "real share 31%; neighbour information smuggled by every channel", "fold 0"],
     ["RNA decoys only (no protein decoys)", "0.37% [0.27, 0.47]", "real share 41%, driven by protein-measured ligands (modality confound)", "5 folds"],
     ["final graph transformer (all controls)", f"{S['contact_real']['gain']:.2%}", "decoys explain as much; no real channel with q <= 0.1", "5 folds x 3 seeds"]],
     columns=["configuration", "LR-branch held-out gain [FOV bootstrap CI]", "decoy diagnosis", "evaluated on"]),
@@ -101,15 +101,15 @@ mrow += [[n, cor[f], S[f"mis_{f}_b0.2"]["rec"], S[f"mis_{f}_b0.4"]["rec"]] for f
 parts.append(table(pd.DataFrame(mrow, columns=["planted response form", "correlation with standard form", "recovered (beta = 0.2)", "recovered (beta = 0.4)"]),
                    "Planted-signal recovery when the planted response does not follow the form assumed by the model (breast contact channels, three-seed ensembles; five evaluable channels).", "tab:s17"))
 parts.append(table(pd.DataFrame([
-    ["EventGraphAttention (4 heads, edge bias, residual, LayerNorm, FFN, 2 layers)", "kept", "--"],
-    ["node encoder; graph + local branch fused by a sigmoid gate", "kept", "--"],
-    ["supervision: LIANA+ inflow score", "measured receiver response", "the reference score is a closed-form function of the inputs (Spearman 1.000)"],
-    ["keys/values: full neighbour state", "neighbour cell type, geometry, event embedding", "neighbour state let every channel, decoys included, carry neighbour information (6.0% spurious gain)"],
-    ["pathway/TF activities as inputs", "pathway/TF activities as supervised readouts", "inputs would contain the response"],
-    ["literature context per event", "removed (tested separately, Table S20)", "only real channels have literature; decoy calibration would fail"],
-    ["one score per event", "additive per-channel contributions", "allows exact channel knockouts and decoy comparison"]],
-    columns=["original component", "this work", "reason"]),
-    "Elements of the original GraTICCS graph transformer kept and changed.", "tab:s18", None, "footnotesize"))
+    ["attention layer", "EventGraphAttention (4 heads, edge bias, residual, LayerNorm, FFN, 2 layers)", "--"],
+    ["encoder and fusion", "node encoder; graph + local branch fused by a sigmoid gate", "--"],
+    ["supervision", "measured receiver response", "agreement with a score computed from the inputs would not show a functional effect"],
+    ["keys and values", "neighbour cell type, geometry, event embedding", "the full neighbour state let every channel, decoys included, carry neighbour information (6.0% spurious gain)"],
+    ["pathway/TF activities", "supervised readouts, not inputs", "inputs would contain the response"],
+    ["literature", "not a model input (tested separately, Table S20)", "only real channels have literature; decoy calibration would fail"],
+    ["output", "additive per-channel contributions", "allows exact channel knockouts and decoy comparison"]],
+    columns=["design element", "choice", "reason"]),
+    "Main design choices of the GraTICCS graph transformer.", "tab:s18", None, "footnotesize"))
 cmp = []
 for name, cond, meta in [("planted, beta = 0.05", "std_b0.05", D / "spike_meta.json"), ("planted, beta = 0.1", "std_b0.1", D / "spike_meta.json"),
                          ("binary gate, beta = 0.2", "gate_b0.2", D / "spike_meta.json"), ("unspiked", "real", None)]:
@@ -145,6 +145,6 @@ for i, (f, cap) in enumerate([("Fig_S_TNFSF9_TNFRSF9", "4-1BBL (TNFSF9) to 4-1BB
                               ("Fig_S_TNFSF18_TNFRSF18", "GITRL (TNFSF18) to GITR (TNFRSF18), contact channel (weaker support)"),
                               ("Fig_S_SPP1_ITGAV_ITGB1", "SPP1 to ITGAV/ITGB1, secreted channel (weak support, literature q = 0.14)")], 1):
     parts += [B + "begin{figure}[h!]", B + "centering", B + "includegraphics[width=" + B + "linewidth]{figures/supp/" + f + ".png}",
-              B + "caption{Literature-supported predicted event: " + cap + ". Layout and selection rule as in main-text Figure 6.}", B + "end{figure}", B + "clearpage", ""]
+              B + "caption{Literature-supported predicted event: " + cap + ". Layout and selection rule as in main-text Figure 5.}", B + "end{figure}", B + "clearpage", ""]
 parts.append(B + "end{document}")
 OUT.write_text("\n".join(parts), encoding="utf8"); print("written", OUT)

@@ -1,5 +1,4 @@
-"""Figures 2 (reference-score circularity), 3 (design iterations) and 5 (pair-level AP)."""
-import json
+"""Figures 2 (design iterations) and 4 (pair-level AP)."""
 from pathlib import Path
 import numpy as np, pandas as pd, matplotlib
 from graticcs.paths import RESULTS, FIGURES
@@ -56,21 +55,3 @@ hv = [("RNA\nco-expr.", h["RNA co-expression alone"], GREY), ("Ã— GraTICCS\n1 âˆ
 bars(axs[1], [v[0] for v in hv], [v[1] for v in hv], [v[2] for v in hv])
 axs[1].set_ylabel("pair-level average precision"); axs[1].set_ylim(0, 0.185); axs[1].set_title("B   RNA-defined planted truth", loc="left", fontsize=8, fontweight="bold")
 fig.tight_layout(); save(fig, "fig4_pair_level")
-
-
-d1 = {n: json.load(open(R / f"d1_{n}.json")) for n in ["human_lymph", "human_frontal_cortex", "mouse_brain"]}
-AQUA, ORANGE, GREY0 = "#1baf7a", "#eb6834", "#a3a29c"
-fig, ax = plt.subplots(figsize=(7.2, 3.2))
-keys = [("spearman_vs_teacher::F_exact_LIANA_formula", "Closed-form formula\n(no learning)", AQUA),
-        ("spearman_vs_teacher::GraTICCS(graph)", "GraTICCS (original,\nLIANA-supervised)", LRC),
-        ("spearman_vs_teacher::F_2hop_noLearning", "2-hop hand formula\n(no learning)", ORANGE),
-        ("spearman_vs_teacher::matched_local", "Matched local model", GREY0)]
-w = 0.2; names = {"human_lymph": "Lymph node", "human_frontal_cortex": "Frontal cortex", "mouse_brain": "Mouse brain"}
-for i, (k, lab, col) in enumerate(keys):
-    v = [d1[n][k] for n in d1]; x = np.arange(3) + (i - 1.5) * w
-    ax.bar(x, v, w * 0.92, color=col, label=lab, edgecolor="#fcfcfb", linewidth=1.5)
-    for xi, vi in zip(x, v): ax.text(xi, vi + 0.01, f"{vi:.2f}", ha="center", va="bottom", fontsize=7, color=INK)
-ax.set_xticks(range(3), [names[n] for n in d1]); ax.set_ylim(0, 1.12); ax.set_ylabel("Spearman vs LIANA+ inflow (test)")
-ax.set_title("LIANA+ inflow is reproduced exactly by a formula: the original target is circular", loc="left", fontsize=10, color=INK)
-ax.legend(ncol=4, fontsize=7, frameon=False, loc="upper center", bbox_to_anchor=(0.5, -0.12))
-fig.tight_layout(); save(fig, "fig1_liana_circularity")
