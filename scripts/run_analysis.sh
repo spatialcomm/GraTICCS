@@ -53,6 +53,7 @@ python -m figures.main_figures
 mkdir -p figures/lit_cases
 python -m figures.case_figure results/cases_secreted_real_G2.csv "FN1->ITGA3_ITGB1" figures/lit_cases/Fig_main_FN1_ITGA3_ITGB1.png 0 secreted
 python -m figures.case_figure results/cases_secreted_real_G2.csv "SPP1->ITGAV_ITGB1" figures/lit_cases/Fig_S_SPP1_ITGAV_ITGB1.png 0 secreted
-python -m figures.case_figure results/cases_contact_real.csv "TNFSF9->TNFRSF9" figures/lit_cases/Fig_S_TNFSF9_TNFRSF9.png 0 contact
+VIS=0 python -m figures.case_figure results/cases_contact_real.csv "TNFSF9->TNFRSF9" figures/lit_cases/Fig_S_TNFSF9_TNFRSF9.png 0 contact
 python -m figures.case_figure results/cases_contact_real.csv "TNFSF18->TNFRSF18" figures/lit_cases/Fig_S_TNFSF18_TNFRSF18.png 0 contact
+python -m figures.case_map "IL1B->IL1R1_IL1RAP" PW_NFkB G2_pw_sec_s0,G2_pw_sec_s1,G2_pw_sec_s2 figures/lit_cases/Fig_S_IL1B_IL1R1_IL1RAP_NFkB.png
 python -m figures.supplementary_tables
