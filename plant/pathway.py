@@ -1,25 +1,34 @@
-"""Planted contact signals on pathway/TF readouts allowed by the receptor family."""
+"""Drawn contact channels planted on pathway/TF readouts: each channel acts on the TF of its first CollecTRI route, or, when
+only literature supports it, on the first readout its receptor family allows. Y = [protein readouts, pathway/TF readouts]."""
 import json
-from pathlib import Path
-import numpy as np, scipy.sparse as sp
+
+import numpy as np
+
 from graticcs.paths import BREAST
+from plant.common import add_signals, contact_inputs, save, table, zscore
+
 D = BREAST; PW = D / "pathway_tf"
-z = np.load(D / "gt_inputs.npz"); meta = json.load(open(D / "gt_channels.json")); pm = json.load(open(PW / "meta.json"))
-names = [c["name"] for c in meta["channels"]]; T = meta["prot_readout"] + pm["readouts"]; Mk = np.load(PW / "mask_contact.npy")
+z, meta, names, _, A, _ = contact_inputs(D)
+pm = json.load(open(PW / "meta.json")); T = meta["prot_readout"] + pm["readouts"]; Mk = np.load(PW / "mask_contact.npy")
 Y0 = np.c_[z["Yp"], np.load(PW / "Y_pathway_tf.npz")["Y"]].astype(np.float64); npr = z["Yp"].shape[1]
-want = ["CD274->PDCD1", "HLA-DRA->CD4", "ICAM1->ITGAM_ITGB2", "TNFSF13B->CD40", "LGALS9->HAVCR2", "CDH1->EGFR", "CD70->CD27"]
-PLANT = []
-for w in want:
-    if w not in names: continue
-    c = names.index(w); allowed = [T[npr + k] for k in np.flatnonzero(Mk[c])]
-    if allowed: PLANT.append((w, allowed[0], +1))
-print("planted (channel, readout):", PLANT)
-n = len(z["fold"]); src, dst, con = z["src"], z["dst"], z["contact"]; ci = con > 0
-A = sp.csr_matrix((np.ones(ci.sum(), np.float32), (dst[ci], src[ci])), shape=(n, n))
-for b in [0.2]:
-    Y = Y0.copy()
-    for chn, tgt, sg in PLANT:
-        c = names.index(chn); x = np.maximum(z["R_mo"][:, c], 0) * (A @ np.maximum(z["L_mo"][:, c], 0)); x = (x - x.mean()) / (x.std() + 1e-12)
-        t = T.index(tgt); Y[:, t] += sg * b * Y0[:, t].std() * x
-    np.savez_compressed(D / f"spike_pw_beta{b}.npz", Y=Y.astype(np.float32))
-json.dump({"plant": PLANT, "betas": [0.2], "tnames": T}, open(D / "spike_pw_meta.json", "w"), indent=1); print("saved")
+routes = table("planted_random_route_refs.csv"); routes = routes[routes.modality == "contact"]
+
+plant = []
+for r in routes.itertuples():
+    c = names.index(r.channel); allowed = {T[npr + k] for k in np.flatnonzero(Mk[c])}
+    if isinstance(r.collectri_routes, str) and r.collectri_routes:
+        tf = "TF_" + r.collectri_routes.split(";")[0].split("/")[1].split(" ")[0]
+    else:
+        tf = sorted(allowed)[0] if allowed else None
+    if tf is None:
+        continue
+    assert tf in allowed, (r.channel, tf)
+    plant.append((r.channel, tf, int(r.sign)))
+print("planted (channel, readout):", plant)
+
+sig = {}
+for chn, tgt, sgn in plant:
+    c = names.index(chn)
+    sig[chn] = zscore(np.maximum(z["R_mo"][:, c], 0) * (A @ np.maximum(z["L_mo"][:, c], 0)))
+save(D, "spike_crand_pw_beta", add_signals(Y0, T, plant, sig, 0.2), 0.2)
+json.dump({"plant": plant, "betas": [0.2], "tnames": T}, open(D / "spike_crand_pw_meta.json", "w"), indent=1)

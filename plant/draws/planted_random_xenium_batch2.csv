@@ -1,0 +1,2 @@
+channel,ligand,receptor,readout,sources,sign,stratum,base_p,base_rank,active,top50,validation,lr_curated,lit_records,exposed,corr_own,lig_cv,eligible
+CD86->CD28,CD86,CD28,GranzymeB,CollecTRI,1,rna,0.475,4,False,False,False,cellchatdb;connectomedb2020;icellnet,,0.0231755360510725,0.397815245024835,0.6749088764190674,True

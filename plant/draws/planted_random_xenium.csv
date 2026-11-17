@@ -1,0 +1,3 @@
+channel,ligand,receptor,readout,sources,sign,stratum,base_p,base_rank,active,top50,validation,lr_curated,lit_records,exposed,corr_own,lig_cv,eligible
+CD86->CTLA4,CD86,CTLA4,GranzymeB,CollecTRI,-1,rna,0.262,1,False,False,False,cellchatdb;connectomedb2020;icellnet,,0.0438850868035417,0.4123068783725211,0.7018046379089355,True
+CDH1->EGFR,CDH1,EGFR,PCNA,CollecTRI,1,protein,0.769,4,False,False,False,connectomedb2020,,0.0571150549691322,0.7023442431386572,0.7699599266052246,True

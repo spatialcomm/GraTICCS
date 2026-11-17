@@ -99,3 +99,33 @@ class LRBranch(nn.Module):
         q = self.q(torch.cat([tdst, hdst], 1)).view(-1, self.H, self.dh)
         k = (self.k(tsrc) + self.event_k(ev)).view(-1, self.H, self.dh)
         return softmax((q * k).sum(-1) / math.sqrt(self.dh) + self.edge_bias(torch.cat([eattr, ev], 1)), dst, num_nodes=n_nodes)
+
+
+class FixedRuleBranch(LRBranch):
+    """Local LR branch with a fixed neighbour-weighting rule instead of attention (controls for the selective-sender tests).
+    rule="type": 1/deg x 2 sigmoid(T[sender type, channel]), T learned and starting at zero (equal weights).
+    rule="area": shared contact length / the receiver's total contact length.
+    rule="dist": exp(-d / 15 um), normalised over the receiver's neighbours."""
+
+    def __init__(self, n_types, d_h, n_channels, n_out, rule):
+        super().__init__(n_types, d_h, n_channels, n_out, graph=False)
+        self.rule = rule
+        if rule == "type":
+            self.T = nn.Parameter(torch.zeros(n_types, n_channels))
+
+    def contributions(self, tsrc, tdst, hdst, eattr, s, dst, n_nodes):
+        gate = torch.sigmoid(self.G[tdst.argmax(1)])
+        if self.rule == "type":
+            w = (1.0 / degree(dst, n_nodes).clamp(min=1)[dst]).unsqueeze(1) * 2 * torch.sigmoid(self.T[tsrc.argmax(1)])
+        else:
+            c = torch.exp(-eattr[:, 1].float()) if self.rule == "dist" else torch.expm1(eattr[:, 0].float())
+            eps = 1e-12 if self.rule == "dist" else 1e-6
+            w = (c / segment_sum(c, dst, n_nodes).clamp(min=eps)[dst]).unsqueeze(1)
+        return w * s * gate
+
+
+def make_lr_branch(arch, n_types, n_channels, n_out, heads=16):
+    """graticcs: learned attention; local: equal weights 1/deg; local_type / local_area / local_dist: fixed rules."""
+    if arch.startswith("local_"):
+        return FixedRuleBranch(n_types, 128, n_channels, n_out, arch.split("_", 1)[1])
+    return LRBranch(n_types, 128, n_channels, n_out, heads=heads, graph=arch == "graticcs")

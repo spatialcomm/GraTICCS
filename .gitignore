@@ -5,7 +5,7 @@ figures/*.png
 figures/*.pdf
 figures/*.svg
 figures/fig1_stages/
-figures/lit_cases/
+figures/cases/
 __pycache__/
 *.pt
 *.npz

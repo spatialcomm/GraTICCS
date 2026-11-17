@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np, pandas as pd, scipy.sparse as sp
 from scipy import stats
 from graticcs.paths import BREAST, RESULTS
-D = BREAST; ND = D / "nichenet_spike"; R = RESULTS
+D = BREAST; ND = D / "nichenet_spike_crand"; R = RESULTS
 meta = json.load(open(ND / "meta.json")); union = meta["union_genes"]; ui = {g: k for k, g in enumerate(union)}; cand = meta["candidates"]
 NN = pd.read_parquet(D / "nichenet_ligand_target.parquet"); lrn = pd.read_parquet(D / "nichenet_lr_network.parquet")
 genes = [g.upper() for g in json.load(open(D / "genes.json"))["genes"]]; gi = {g: k for k, g in enumerate(genes)}
@@ -59,7 +59,7 @@ summ = df[df.apply(lambda r: r.sender == best_sender[r.ligand], axis=1)].copy();
 print("main sender per ligand:", best_sender)
 print(summ[["beta", "ligand", "sender", "candidate", "n_candidates", "geneset", "activity", "rank", "recovered"]].to_string(index=False))
 print(summ.groupby("beta").recovered.sum())
-df.to_csv(R / "nichenet_all.csv", index=False); summ.to_csv(R / "nichenet_summary.csv", index=False)
+df.to_csv(R / "nichenet_all_crand.csv", index=False); summ.to_csv(R / "nichenet_summary_crand.csv", index=False)
 
 
 rows = []
@@ -77,4 +77,4 @@ for b in meta["betas"]:
         r = ranked.index(L) + 1 if L in act else np.nan
         rows.append(dict(beta=b, ligand=L, niche_cells=int(niche.sum()), geneset=len(gs), rank=r, n=len(cand), recovered=bool(r <= 3)))
         print(rows[-1], flush=True)
-df = pd.DataFrame(rows); print(df.groupby("beta").recovered.sum()); df.to_csv(R / "nichenet_ligand_niche.csv", index=False)
+df = pd.DataFrame(rows); print(df.groupby("beta").recovered.sum()); df.to_csv(R / "nichenet_ligand_niche_crand.csv", index=False)

@@ -1,7 +1,7 @@
 """Train GraTICCS on secreted channels (all neighbours within 30 um), 5-fold spatial cross-fitting.
 
 python train_secreted.py --out G2_sec_real_s0 --seed 0 --accum 2 --batch-fovs 2
-python train_secreted.py --out G2_sec_spike_b0.1 --targets data/breast/spike_sec_beta0.1.npz --accum 2 --batch-fovs 2
+python train_secreted.py --out G2_sec_rand_b0.1_s0 --seed 0 --targets data/breast/spike_sec_rand_beta0.1.npz --accum 2 --batch-fovs 2
 """
 import argparse
 import json
@@ -12,7 +12,7 @@ import torch
 import torch.nn.functional as F
 
 from graticcs.data import DATA, Graph, batches, comp_feats, dev, fold_split, load, target_mask, to_dev, train_stage
-from graticcs.model import Background, LRBranch
+from graticcs.model import Background, make_lr_branch
 from graticcs.paths import RESULTS
 
 T0 = time.time()
@@ -25,7 +25,9 @@ def log(*a):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
-    ap.add_argument("--arch", choices=["graticcs", "local"], default="graticcs")
+    ap.add_argument("--arch", choices=["graticcs", "local", "local_type", "local_dist"], default="graticcs",
+                    help="local: equal neighbour weights; local_*: fixed weighting rules")
+    ap.add_argument("--heads", type=int, default=16, help="attention heads of the LR branch")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--targets", help="npz with a replacement readout matrix Y (planted signals, prior programs)")
     ap.add_argument("--readout-names", help="json with the names of the replacement readouts")
@@ -92,7 +94,7 @@ def main():
         graph = args.arch == "graticcs"
         xin = lambda g: (torch.cat([g["x"], g["comp"], g["spill"]], 1), g["tt"], g["ei"], g["eattr"])
         nu = Background(xin(sub(tr[:4]))[0].shape[1], ntypes, nT, graph=graph).to(dev)
-        lr = LRBranch(ntypes, 128, C, nT, graph=graph).to(dev)
+        lr = make_lr_branch(args.arch, ntypes, C, nT, args.heads).to(dev)
         Mt = torch.as_tensor(M, device=dev)
         bg = lambda g: nu(*xin(g))
 

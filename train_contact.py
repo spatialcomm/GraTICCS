@@ -1,8 +1,8 @@
 """Train GraTICCS on contact channels with 5-fold spatial cross-fitting and write held-out knockout statistics.
 
 python train_contact.py --out G_real_s0 --seed 0
-python train_contact.py --out G_spike_b0.1_s0 --seed 0 --spike 0.1
-python train_contact.py --arch local --out arch_local_real_s0     # matched local model
+python train_contact.py --out G_crand_b0.1_s0 --seed 0 --spike 0.1 --spike-prefix spike_crand_beta
+python train_contact.py --out L_real_s0 --seed 0 --arch local     # matched local model
 """
 import argparse
 import json
@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 
 from graticcs.data import DATA, Graph, batches, comp_feats, dev, fold_split, load, target_mask, to_dev, train_stage
-from graticcs.model import Background, LRBranch
+from graticcs.model import Background, make_lr_branch
 from graticcs.paths import RESULTS
 
 T0 = time.time()
@@ -53,7 +53,7 @@ def run_fold(d, G, k, args, out, ctype, ntypes):
     tt_of = lambda g: ohT[ct[torch.as_tensor(g["nodes"], device=dev)]]
     xin = lambda g: (torch.cat([g["x"], g["comp"], g["spill"]], 1), tt_of(g), g["ei"], g["eattr"])
     nu = Background(xin(sub(tr[:4]))[0].shape[1], ntypes, nT, graph=graph).to(dev)
-    lr = LRBranch(ntypes, 128, C, nT, graph=graph).to(dev)
+    lr = make_lr_branch(args.arch, ntypes, C, nT, args.heads).to(dev)
     M = torch.as_tensor(target_mask(d), device=dev)
     bg = lambda g: nu(*xin(g))
 
@@ -116,7 +116,9 @@ def run_fold(d, G, k, args, out, ctype, ntypes):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, help="run name (folder under results/)")
-    ap.add_argument("--arch", choices=["graticcs", "local"], default="graticcs")
+    ap.add_argument("--arch", choices=["graticcs", "local", "local_type", "local_area"], default="graticcs",
+                    help="local: equal neighbour weights; local_*: fixed weighting rules")
+    ap.add_argument("--heads", type=int, default=16, help="attention heads of the LR branch")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--spike", help="planted strength beta; reads <spike-prefix><beta>.npz")
     ap.add_argument("--spike-prefix", default="spike_beta")

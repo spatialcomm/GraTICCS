@@ -1,29 +1,40 @@
-"""Planted contact signals on the breast readouts (protein-defined L and R)."""
-import json
-from pathlib import Path
-import numpy as np, scipy.sparse as sp
-from graticcs.paths import BREAST
+"""Planted contact signals for the drawn channels: x = R_i * sum over contacting senders j of L_j.
 
-D = BREAST
-PLANT = [("CD274->PDCD1", "GZMB", -1), ("HLA-DRA->CD4", "Ki-67", +1), ("ICAM1->ITGAM_ITGB2", "iNOS", +1),
-         ("CD70->CD27", "CD38", +1), ("LGALS9->HAVCR2", "GZMA", -1), ("TNFSF13B->CD40", "NF-kB p65", +1),
-         ("HLA-A->CD8A", "CYTOTOX", +1)]
-BETAS = [0.05, 0.1, 0.2, 0.4]
-z = np.load(D / "gt_inputs.npz"); meta = json.load(open(D / "gt_channels.json"))
-names = [c["name"] for c in meta["channels"]]; tnames = meta["prot_readout"] + meta["rna_programs"]
-n = len(z["fold"]); src, dst, con = z["src"], z["dst"], z["contact"]
-ci = con > 0
-A = sp.csr_matrix((np.ones(ci.sum(), np.float32), (dst[ci], src[ci])), shape=(n, n))
-Y0 = np.c_[z["Yp"], z["Yr"]].astype(np.float64)
-expo = {}
-for chn, tgt, sgn in PLANT:
-    c = names.index(chn); L = np.maximum(z["L_mo"][:, c], 0); R = np.maximum(z["R_mo"][:, c], 0)
-    x = R * (A @ L); expo[chn] = (x - x.mean()) / (x.std() + 1e-12)
+python -m plant.contact                          # breast, protein-defined L and R where available
+python -m plant.contact --rna                    # breast, RNA-defined L and R
+python -m plant.contact --xenium                 # renal section, first draw
+python -m plant.contact --xenium --draw planted_random_xenium_batch2.csv --prefix spike_crand2_beta
+"""
+import argparse
+import json
+
+import numpy as np
+
+from graticcs.paths import BREAST, XENIUM
+from plant.common import add_signals, contact_inputs, drawn, save, zscore
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--rna", action="store_true")
+ap.add_argument("--xenium", action="store_true")
+ap.add_argument("--draw", help="csv of drawn pairs under results/")
+ap.add_argument("--prefix")
+args = ap.parse_args()
+
+D = XENIUM if args.xenium else BREAST
+plant = drawn("xenium" if args.xenium else "contact", args.draw)
+if args.rna:
+    lk, rk, betas, prefix = "L_rna", "R_rna", [0.1, 0.4], "spike_crand_rna_beta"
+else:
+    lk, rk, prefix = "L_mo", "R_mo", "spike_crand_beta"
+    betas = [0.1, 0.4] if args.xenium else [0.05, 0.1, 0.2, 0.4]
+prefix = args.prefix or prefix
+
+z, meta, names, tnames, A, Y0 = contact_inputs(D)
+sig = {}
+for chn, tgt, sgn in plant:
+    c = names.index(chn)
+    x = np.maximum(z[rk][:, c], 0) * (A @ np.maximum(z[lk][:, c], 0)); sig[chn] = zscore(x)
     print(f"{chn:22s} -> {tgt:9s} exposed cells {(x > 0).mean():.3f}")
-for b in BETAS:
-    Y = Y0.copy()
-    for chn, tgt, sgn in PLANT:
-        t = tnames.index(tgt); Y[:, t] += sgn * b * Y0[:, t].std() * expo[chn]
-    np.savez_compressed(D / f"spike_beta{b}.npz", Y=Y.astype(np.float32))
-json.dump({"plant": PLANT, "betas": BETAS, "tnames": tnames}, open(D / "spike_meta.json", "w"), indent=1)
-print("saved")
+for b in betas:
+    save(D, prefix, add_signals(Y0, tnames, plant, sig, b), b)
+json.dump({"plant": plant, "betas": betas, "tnames": tnames}, open(D / (prefix.replace("_beta", "") + "_meta.json"), "w"), indent=1)

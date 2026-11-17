@@ -1,4 +1,5 @@
-"""Recovery, additional selections and q-values for every analysis in the paper -> results/gt_summary.json."""
+"""Channel calibration shared by the analyses, and the original-tissue summary (prediction gain per seed and pooled,
+channels with q <= 0.1) -> results/original_tissue_summary.json."""
 import json, sys
 from pathlib import Path
 import numpy as np, pandas as pd
@@ -46,28 +47,12 @@ def evaluate(kind, runs, meta=None, exclude_natural=False):
 
 
 if __name__ == "__main__":
-    pref = sys.argv[1] if len(sys.argv) > 1 else "G"
     s3 = lambda base: [f"{base}_s{s}" for s in range(3)]
-    if pref == "G":
-        runs = {f"contact_spike_b{b}": ("c", s3(f"G_spike_b{b}"), B / "spike_meta.json", True) for b in (0.05, 0.1, 0.2, 0.4)}
-        runs.update({f"contact_spike_b{b}_seed{s}": ("c", [f"G_spike_b{b}_s{s}"], B / "spike_meta.json", True) for b in (0.05, 0.1, 0.2, 0.4) for s in range(3)})
-        runs.update({f"secreted_spike_b{b}": ("s", [f"G2_sec_spike_b{b}"], B / "spike_sec_meta.json", False) for b in (0.05, 0.1, 0.2, 0.4)})
-        runs.update({f"xenium_spike_b{b}": ("x", [f"G_xen_spike_b{b}"], X / "spike_meta.json", False) for b in (0.1, 0.4)})
-        runs["pathway_spike_b0.2"] = ("c", ["G_pw_contact_spike_b0.2"], B / "spike_pw_meta.json", False)
-        for f in ("gate", "hill", "decay"):
-            for b in (0.2, 0.4):
-                runs[f"mis_{f}_b{b}"] = ("c", s3("arch_graticcs_gate_b0.2") if (f, b) == ("gate", 0.2) else s3(f"G_mis_{f}_b{b}"), B / "spike_meta.json", True)
-        for r in (0.3, 0.5, 0.7):
-            for b in (0.2, 0.4): runs[f"lag_r{r}_b{b}"] = ("c", [f"G_lag_r{r}_b{b}"], B / "spike_meta.json", True)
-        for b in (0.2, 0.4): runs[f"lag_r1.0_b{b}"] = ("c", [f"G_spike_b{b}_s0"], B / "spike_meta.json", True)
-        for b in (0.1, 0.4): runs[f"spikeRNA_b{b}"] = ("c", [f"G_spikeRNA_b{b}"], B / "spike_rna_meta.json", True)
-        runs.update(contact_real=("c", s3("G_real"), None, False), contact_real_niche=("c", s3("G_real_niche"), None, False),
-                    contact_pw_real=("c", s3("G_pw_contact"), None, False), secreted_real=("s", s3("G2_sec_real"), None, False),
-                    secreted_pw_real=("s", s3("G2_pw_sec"), None, False), xenium_real=("x", s3("G_xen_real"), None, False))
-        for s in range(3): runs[f"contact_real_seed{s}"] = ("c", [f"G_real_s{s}"], None, False)
-        for s in range(3): runs[f"secreted_pw_real_seed{s}"] = ("s", [f"G2_pw_sec_s{s}"], None, False)
+    runs = dict(contact_real=("c", "G_real"), contact_real_niche=("c", "G_real_niche"), contact_pathway_real=("c", "G_pw_contact"),
+                contact_local_real=("c", "L_real"), secreted_real=("s", "G2_sec_real"), secreted_pathway_real=("s", "G2_pw_sec"),
+                xenium_real=("x", "G_xen_real"))
     rows = {}
-    for name, (kind, rr, meta, exn) in runs.items():
-        o = evaluate(kind, rr, meta, exn); rows[name] = o
-        print(f"{name:28s} gain {o['gain']:+.3%}  q<=0.1 {o['n_q10']:3d}" + (f"  recovered {o['rec']}  FP {o['fp']} (shared ligand {o['fp_shared_ligand']})  {o['detail']}" if meta else ""))
-    json.dump({k: {kk: vv for kk, vv in v.items()} for k, v in rows.items()}, open(R / "gt_summary.json", "w"), indent=1, default=float)
+    for name, (kind, base) in runs.items():
+        o = evaluate(kind, s3(base)); o["seed_gain"] = [evaluate(kind, [r])["gain"] for r in s3(base)]; rows[name] = o
+        print(f"{name:24s} gain {o['gain']:+.3%}  seeds " + " ".join(f"{g:+.2%}" for g in o["seed_gain"]) + f"  q<=0.1 {o['n_q10']}")
+    json.dump(rows, open(R / "original_tissue_summary.json", "w"), indent=1, default=float)

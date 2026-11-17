@@ -1,13 +1,17 @@
 """Literature check on decoy channels: same response genes, ranking and control rules as analysis.literature_test.
 
+The channels checked are those with a positive effect and p <= 0.05 in the literature test. Primary control: the decoys that
+share the channel's receptor; secondary: all decoys of the same modality, each with its own receptor-positive controls.
+
 python -m analysis.lit_decoy_control"""
 import json
 import numpy as np, pandas as pd, scipy.sparse as sp, torch
 from scipy.stats import mannwhitneyu
 from graticcs.paths import BREAST, RESULTS
 D, R = BREAST, RESULTS
-CASES = [("secreted", "G2_sec_real", "lit_enrichment_secreted_real_G2.csv", ["FN1->ITGA3_ITGB1", "FN1->ITGA5_ITGB1", "FN1->ITGAV_ITGB1", "SPP1->ITGAV_ITGB1"]),
-         ("contact", "G_real", "lit_enrichment_contact_real.csv", ["TNFSF9->TNFRSF9", "TNFSF18->TNFRSF18"])]
+pick = lambda f: pd.read_csv(R / f).query("mw_p <= 0.05 and effect > 0").channel.tolist()
+CASES = [("secreted", "G2_sec_real", "lit_enrichment_secreted_real_G2.csv", pick("lit_enrichment_secreted_real_G2.csv")),
+         ("contact", "G_real", "lit_enrichment_contact_real.csv", pick("lit_enrichment_contact_real.csv"))]
 z = np.load(D / "gt_inputs.npz"); ctype = z["ctype"]
 genes = [g.upper() for g in json.load(open(D / "genes.json"))["genes"]]; gi = {g: i for i, g in enumerate(genes)}
 X = sp.load_npz(D / "rna_counts.npz").tocsr(); lib = np.maximum(np.asarray(X.sum(1)).ravel(), 1)

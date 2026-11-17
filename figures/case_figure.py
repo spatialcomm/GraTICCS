@@ -1,141 +1,156 @@
-"""Figure 6 and Supplementary Figures S1-S3: one literature-supported event with real cell outlines and transcripts."""
-import json, os, sys, re
+"""Case figure in two panels:
+  <out>_A.png  one predicted event in the tissue; cells filled with immunofluorescence, ligand and receptor drawn in the
+               measurement used by the model (protein markers or RNA transcripts)
+  <out>_B.png  the dose-response comparison of analysis.dose_response for the ligand and its same-receptor decoys
+The event shown is, among the channel's 50 best-scored events, the one with the most cells in its display window.
+
+python -m figures.case_figure <events.csv> <channel> <out_prefix> <contact|secreted> <dose_response.csv>
+"""
+import json, sys
 from pathlib import Path
 import numpy as np, pandas as pd, scipy.sparse as sp, matplotlib
-from graticcs.paths import BREAST, RAW
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon, FancyArrowPatch
+from matplotlib.patches import Polygon, FancyArrowPatch, Patch
 from matplotlib.lines import Line2D
-from scipy.stats import mannwhitneyu
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize
+
 from graticcs.lr_map import GENE2PROT
-D = BREAST
-COSMX = RAW / "cosmx_breast"
-REC = COSMX / "literature_records"
-cases, chn, outp = pd.read_csv(sys.argv[1]), sys.argv[2], sys.argv[3]
-row_i = int(sys.argv[4]) if len(sys.argv) > 4 else 0; cls = sys.argv[5] if len(sys.argv) > 5 else "secreted"
+from graticcs.paths import BREAST, RAW, RESULTS
+D, R, RAW = BREAST, RESULTS, RAW / "cosmx_breast"
+ev_path, chn, outp, cls, dr_path = sys.argv[1:6]
 UM = 0.5119 / 4256 * 1000
-BG, INK, GOLD, RED, CORAL, MUTE = "#000000", "#f2f2f2", "#f5c518", "#e8412c", "#ff6b5a", "#b0b0b0"
-_cc = cases[cases.channel == chn].sort_values("rank_all")
-_vis = _cc[(_cc.ligand_rna >= 2) & (_cc.receptor_rna >= 1)] if os.environ.get("VIS", "1") == "1" else _cc
-cs = (_vis if len(_vis) > row_i else _cc).iloc[row_i]
-lit = json.load(open(D / "lit_channel_matches.json"))[cls][chn]
+RED, NAVY, GREY, BAND = "#e8412c", "#3C5488", "#b0b0b0", "#3a3a3a"
+GOLD = "#f5c518"
+BGC, FG, EDGE, CONT, AXBG = "#000000", "#f2f2f2", "#3a3a3a", "#ffffff", "#0b0c10"
+import os
+from matplotlib.colors import LinearSegmentedColormap
+_cm = os.environ.get("CMAP_NAME", "viridis")
+CMAP = LinearSegmentedColormap.from_list("navyblues", ["#102a4c", "#1f4e8c", "#2171b5", "#4292c6", "#6baed6"])
+plt.rcParams.update({"font.family": "Arial", "font.size": 8, "axes.linewidth": 0.8, "text.color": FG, "axes.labelcolor": FG,
+                     "xtick.color": FG, "ytick.color": FG, "axes.edgecolor": FG, "axes.facecolor": AXBG, "figure.facecolor": BGC})
 lig_genes, rec_genes = chn.split("->")[0].split("_"), chn.split("->")[1].split("_")
-genes = [g.upper() for g in json.load(open(D / "genes.json"))["genes"]]; gi = {g: i for i, g in enumerate(genes)}
-up = sorted({g for g, ev in lit["effectors"].items() if g in gi and g not in lig_genes + rec_genes and any(d.startswith("up") for d, _ in ev)})
-def short_cite(c, doi):
-    if not c: return ""
-    m_au = re.match(r"^([A-Z][A-Za-z'\-]+)\s+[A-Z]{1,3}", c); au = (m_au.group(1) + " et al.,") if m_au else ""; yr = re.search(r"(19|20)\d{2}", c); parts = [x.strip() for x in c.split(". ")]
-    jn = next((parts[i - 1] for i, x in enumerate(parts) if yr and yr.group(0) in x and i > 0), "")
-    jn = jn if len(jn) < 45 else jn[:42] + "..."
-    return f"{au} {jn} {yr.group(0) if yr else ''}".strip() + (f" (doi:{doi})" if doi else "")
-cites, relays = [], []
-for pp in lit["papers"]:
-    r = json.load(open(REC / pp["file"], encoding="utf-8-sig"))
-    if any(isinstance(e, dict) and e.get("measured_in") == "receiver" for e in r.get("downstream_effectors") or []):
-        c = (r.get("reference") or {}).get("citation", ""); c = short_cite(c, (r.get("reference") or {}).get("doi"))
-        if c and c not in cites: cites.append(c)
-    for x in r.get("intracellular_relay") or []:
-        if isinstance(x, dict) and x.get("to"): relays.append(str(x["to"]))
-relay = pd.Series(relays).value_counts().index[0] if relays else ""
-cells = pd.read_parquet(D / "cells.parquet"); idx = pd.Series(np.arange(len(cells)), index=cells.cell_id)
+LNAME = {"IL1B": "IL-1β", "LGALS9": "Galectin-9"}.get(lig_genes[0], lig_genes[0])
+cells = pd.read_parquet(D / "cells.parquet"); n = len(cells); idx = pd.Series(np.arange(n), index=cells.cell_id)
+CX, CY = cells.CenterX_global_px.to_numpy(), cells.CenterY_global_px.to_numpy()
 z = np.load(D / "gt_inputs.npz"); types = json.load(open(D / "gt_channels.json"))["types"]; ctype = z["ctype"]
+genes = [g.upper() for g in json.load(open(D / "genes.json"))["genes"]]; gi = {g: i for i, g in enumerate(genes)}
 X = sp.load_npz(D / "rna_counts.npz").tocsr()
-allc = cases[cases.channel == chn].drop_duplicates("receiver").sort_values("rank_all").head(50)
-top_r = idx[allc.receiver].to_numpy()
-lib = np.asarray(X.sum(1)).ravel(); Xu = X[:, [gi[g] for g in up]].toarray() / np.maximum(lib, 1)[:, None] * 1e3
-lu = np.log1p(Xu); zt = np.zeros_like(lu)
-for t in np.unique(ctype):
-    m = ctype == t; zt[m] = (lu[m] - lu[m].mean(0)) / (lu[m].std(0) + 1e-9)
-gscore = zt.mean(1)
-rec_expr = np.asarray(X[:, [gi[g] for g in rec_genes if g in gi]].sum(1)).ravel()
-ctrl = np.flatnonzero(np.isin(ctype, ctype[top_r]) & (rec_expr > 0) & ~np.isin(np.arange(len(ctype)), top_r))
-mw = mannwhitneyu(gscore[top_r], gscore[ctrl], alternative="greater")
-if os.environ.get("PICK", "response") == "response" and len(_vis):
-    _cand = _vis.head(50).copy(); _cand["resp"] = gscore[idx[_cand.receiver].to_numpy()]; cs = _cand.sort_values("resp", ascending=False).iloc[0]
-si, ri, fov = idx[cs.sender], idx[cs.receiver], int(cs.fov)
+# ---------- event: densest display window among the 50 best-ranked events
+ev = pd.read_csv(ev_path); ev = ev[ev.channel == chn].sort_values("rank_all")
+def window(a, b):
+    mx, my = (CX[a] + CX[b]) / 2, (CY[a] + CY[b]) / 2; return mx, my, max(20 / UM, 1.7 * np.hypot(CX[a] - CX[b], CY[a] - CY[b]))
+def ncell(e):
+    mx, my, h = window(idx[e.sender], idx[e.receiver]); return int(((abs(CX - mx) < h) & (abs(CY - my) < h)).sum())
+top = ev.head(50).copy(); top["ncell"] = [ncell(e) for _, e in top.iterrows()]
+cs = top.sort_values(["ncell", "rank_all"], ascending=[False, True]).iloc[0]
+si, ri, fov = idx[cs.sender], idx[cs.receiver], int(cs.fov); cx, cy, half = window(si, ri)
 csrc, cdst = z["src"][z["contact"] > 0], z["dst"][z["contact"] > 0]; nb = np.unique(csrc[cdst == ri])
-pct = (gscore[ctype == ctype[ri]] < gscore[ri]).mean() * 100
-cx, cy = (cells.CenterX_global_px[si] + cells.CenterX_global_px[ri]) / 2, (cells.CenterY_global_px[si] + cells.CenterY_global_px[ri]) / 2
-half = max(20 / UM, 1.7 * np.hypot(cells.CenterX_global_px[si] - cells.CenterX_global_px[ri], cells.CenterY_global_px[si] - cells.CenterY_global_px[ri]))
-poly = pd.read_csv(COSMX / "BreastCancer-polygons.csv", usecols=["fov", "cellID", "x_global_px", "y_global_px"]) if False else None
-poly = pd.read_csv(COSMX / "BreastCancer-polygons.csv"); poly = poly[poly.fov == fov]
-pcol = "cellID" if "cellID" in poly.columns else "cell_ID" if "cell_ID" in poly.columns else "cell"
-tx = pd.read_parquet(D / "tx_by_fov" / f"fov{fov:03d}.parquet")
-tx = tx[(abs(tx.x_global_px - cx) < half) & (abs(tx.y_global_px - cy) < half)]
-def rng(col):
+pcol_of = lambda g: (f"P_{GENE2PROT[g]}" if GENE2PROT.get(g) and f"P_{GENE2PROT[g]}" in cells.columns else None)
+pct_all = lambda col: pd.Series(cells[col].to_numpy(float)).rank(pct=True).to_numpy() * 100
+RO = cs.best_readout; ro_pct = pct_all("P_" + RO)
+lig_prot = [pcol_of(g) for g in lig_genes]; lig_is_prot = all(p is not None for p in lig_prot)
+rec_prot = [pcol_of(g) for g in rec_genes]; rec_is_prot = all(p is not None for p in rec_prot)
+PNAME = {"IL-1b": "IL-1β", "Tim-3": "TIM-3"}
+TNAME = lambda t: "unassigned type" if t == "other" else (t + " cell" if t in ("T", "B") else t)
+ordinal = lambda v: f"{int(round(v))}" + ("th" if 10 <= int(round(v)) % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(int(round(v)) % 10, "th"))
+# ---------- panel A
+poly = pd.read_csv(RAW / "BreastCancer-polygons.csv"); poly = poly[poly.fov == fov]
+pcol = "cellID" if "cellID" in poly.columns else "cell_ID"
+tx = pd.read_parquet(D / "tx_by_fov" / f"fov{fov:03d}.parquet"); tx = tx[(abs(tx.x_global_px - cx) < half) & (abs(tx.y_global_px - cy) < half)]
+fig = plt.figure(figsize=(6.2, 6.6)); ax = fig.add_axes([0.05, 0.22, 0.92, 0.75])
+fig.text(0.01, 0.985, "A", fontsize=12, fontweight="bold", va="top", color=FG); ax.set_facecolor(AXBG)
+def _rng(col):
     v = cells[col].to_numpy(float); lo, hi = np.percentile(v, [2, 99.5]); return np.clip((v - lo) / (hi - lo), 0, 1)
-rgb = np.c_[rng("Mean.CD45"), rng("Mean.PanCK"), rng("Mean.DAPI")] ** 0.6
-fig = plt.figure(figsize=(10, 9.4), facecolor=BG); ax = fig.add_axes([0.04, 0.17, 0.68, 0.70], facecolor="#0b0c10")
-cid_of = lambda c: f"c_1_{fov}_{int(c)}"
+IF = np.c_[_rng("Mean.CD45"), _rng("Mean.PanCK"), _rng("Mean.DAPI")] ** 0.6
+shown = []
 for cell, g in poly.groupby(pcol):
     xy = g[["x_global_px", "y_global_px"]].to_numpy()
     if (abs(xy[:, 0].mean() - cx) > half * 1.2) or (abs(xy[:, 1].mean() - cy) > half * 1.2): continue
-    key = cid_of(cell) if pcol != "cell" else cell
+    key = f"c_1_{fov}_{int(cell)}"
     if key not in idx.index: continue
-    k = idx[key]; ec, lw, ls, fa = "#3a3a3a", 0.4, "-", 0.62
-    if k == si: ec, lw, fa = GOLD, 2.2, 0.85
-    elif k == ri: ec, lw, fa = RED, 2.2, 0.85
-    elif k in nb: ec, lw, ls = "#ffffff", 1.1, (0, (3, 2))
-    ax.add_patch(Polygon(xy, closed=True, facecolor=(*rgb[k], fa), edgecolor=ec, linewidth=lw, linestyle=ls, zorder=3 if k in (si, ri) else 2 if k in nb else 1))
-cell_of_tx = tx.cell_ID.map(lambda c: idx.get(cid_of(c), -1))
-def plot_tx(mask, marker, color, size, z):
-    t = tx[mask]; ax.scatter(t.x_global_px, t.y_global_px, marker=marker, s=size, c=color, edgecolors="#000000", linewidths=0.4, zorder=z)
-    return int(mask.sum())
-n_l = plot_tx(tx.target.str.upper().isin(lig_genes) & (cell_of_tx == si), "^", GOLD, 30, 6)
-n_r = plot_tx(tx.target.str.upper().isin(rec_genes) & (cell_of_tx == ri), "s", RED, 26, 6)
-dmask = tx.target.str.upper().isin(up) & cell_of_tx.isin(np.r_[ri, nb])
-n_d = plot_tx(dmask, "o", CORAL, 14, 5); n_dg = tx[dmask].target.nunique()
-sx, sy, rx, ry = cells.CenterX_global_px[si], cells.CenterY_global_px[si], cells.CenterY_global_px[ri] * 0 + cells.CenterX_global_px[ri], cells.CenterY_global_px[ri]
-ax.add_patch(FancyArrowPatch((sx, sy), (rx, ry), arrowstyle="-|>", mutation_scale=22, color="white", lw=2.4, shrinkA=14, shrinkB=14, zorder=7))
-def prot(gl, k):
-    out = []
-    for g in gl:
-        pc = GENE2PROT.get(g)
-        if pc and f"P_{pc}" in cells.columns:
-            v = cells[f"P_{pc}"].to_numpy(float); out.append(f"{pc} protein p{(v < v[k]).mean() * 100:.0f}")
-    return out
+    k = idx[key]; shown.append(k); ec, lw, ls, zz = EDGE, 0.5, "-", 1
+    fa = 0.62
+    if k == si: ec, lw, zz, fa = GOLD, 2.6, 4, 0.85
+    elif k == ri: ec, lw, zz, fa = RED, 2.6, 4, 0.85
+    elif k in nb: ec, lw, ls, zz = CONT, 1.0, (0, (3, 2)), 2
+    ax.add_patch(Polygon(xy, closed=True, facecolor=(*IF[k], fa), edgecolor=ec, linewidth=lw, linestyle=ls, zorder=zz))
+shown = np.array(shown)
+cell_of_tx = tx.cell_ID.map(lambda c: idx.get(f"c_1_{fov}_{int(c)}", -1))
+def plot_tx(mask, marker, fc, size, zz):
+    t = tx[mask]; ax.scatter(t.x_global_px, t.y_global_px, marker=marker, s=size, c=fc, edgecolors="#000000", linewidths=0.6, zorder=zz); return int(mask.sum())
+leg = []
+if lig_is_prot:
+    lp = np.mean([pct_all(p) for p in lig_prot], 0); hi = shown[lp[shown] >= 75]
+    ax.scatter(CX[hi], CY[hi], marker="D", s=(lp[hi] - 70) * 3.0, c=GOLD, edgecolors="#000000", linewidths=0.8, zorder=6)
+    leg.append(Line2D([], [], marker="D", ls="", mfc=GOLD, mec="k", ms=6, label=f"{LNAME} protein at or above the 75th percentile (larger = higher)"))
+else:
+    nl = plot_tx(tx.target.str.upper().isin(lig_genes) & (cell_of_tx >= 0), "^", GOLD, 26, 6)
+    leg.append(Line2D([], [], marker="^", ls="", mfc=GOLD, mec="k", ms=7, label=f"{'+'.join(lig_genes)} RNA transcripts (n={nl})"))
+if not rec_is_prot:
+    nr = plot_tx(tx.target.str.upper().isin(rec_genes) & (cell_of_tx == ri), "s", RED, 26, 6)
+    leg.append(Line2D([], [], marker="s", ls="", mfc=RED, mec="k", ms=6, label=f"{'+'.join(rec_genes)} RNA transcripts in receiver (n={nr})"))
+leg += [Line2D([], [], color=GOLD, lw=2.4, label="Sender"), Line2D([], [], color=RED, lw=2.4, label="Receiver"),
+        Line2D([], [], color=CONT, lw=1.0, ls=(0, (3, 2)), label="Cells contacting the receiver")]
+ax.add_patch(FancyArrowPatch((CX[si], CY[si]), (CX[ri], CY[ri]), arrowstyle="-|>", mutation_scale=16, color="#ffffff", lw=1.8, shrinkA=10, shrinkB=10, zorder=7))
+def pct_of(col, k):
+    v = cells[col].to_numpy(float); return (v < v[k]).mean() * 100
+def feat(gl, k):
+    return [f"{PNAME.get(GENE2PROT[g], GENE2PROT[g])} protein: {ordinal(pct_of(pcol_of(g), k))} pct." if pcol_of(g) else (lambda v: f"{g} RNA: {v} transcript" + ("" if v == 1 else "s"))(int(X[k, gi[g]]) if g in gi else 0) for g in gl]
 def box(x, y, title, lines, col):
-    ax.text(x, y, "\n".join([title] + lines), color=col, fontsize=9.5, fontweight="bold", ha="center", va="center", zorder=8,
+    ax.text(x, y, "\n".join([title] + lines), color=col, fontsize=7.5, fontweight="bold", ha="center", va="center", zorder=8, linespacing=1.25,
             bbox=dict(boxstyle="round,pad=0.35", fc="#000000", ec=col, lw=1.4))
-lr_raw = lambda k, gl: "+".join(gl) + "=" + str(int(sum(X[k, gi[g]] for g in gl if g in gi)))
-off = half * 0.62
-box(sx + (sx - rx) * 0.2, sy + np.sign(sy - ry + 1e-9) * off, "SENDER", [types[ctype[si]], cs.sender, lr_raw(si, lig_genes)] + prot(lig_genes, si), GOLD)
-box(rx + (rx - sx) * 0.2, ry + np.sign(ry - sy + 1e-9) * off, "RECEIVER", [types[ctype[ri]], cs.receiver, lr_raw(ri, rec_genes)] + prot(rec_genes, ri), RED)
+off = half * 0.62; sx, sy, rx, ry = CX[si], CY[si], CX[ri], CY[ri]
+box(sx + (sx - rx) * 0.2, sy + np.sign(sy - ry + 1e-9) * off, "Sender", [TNAME(types[ctype[si]])] + feat(lig_genes, si), GOLD)
+box(rx + (rx - sx) * 0.2, ry + np.sign(ry - sy + 1e-9) * off, "Receiver", [TNAME(types[ctype[ri]])] + feat(rec_genes, ri) + [f"{RO} protein: {ordinal(pct_of('P_' + RO, ri))} pct."], RED)
 ax.set_xlim(cx - half, cx + half); ax.set_ylim(cy - half, cy + half); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
-for s_ in ax.spines.values(): s_.set_color("#333333")
-ax.plot([cx - half * 0.92, cx - half * 0.92 + 10 / UM], [cy - half * 0.92] * 2, color="white", lw=3); ax.text(cx - half * 0.92 + 5 / UM, cy - half * 0.86, "10 µm", color="white", ha="center", fontsize=8)
-leg = [Line2D([], [], marker="^", ls="", color=GOLD, mec="k", ms=9, label=f"Ligand {'+'.join(lig_genes)} transcripts in sender (n={n_l}; measured positions)"),
-       Line2D([], [], marker="s", ls="", color=RED, mec="k", ms=8, label=f"Receptor {'+'.join(rec_genes)} transcripts in receiver (n={n_r})"),
-       Line2D([], [], marker="o", ls="", color=CORAL, mec="k", ms=7, label=f"Literature response genes in receiver + contacts ({n_dg} gene{"s" if n_dg != 1 else ""}, {n_d} transcript{"s" if n_d != 1 else ""})"),
-       Line2D([], [], color=GOLD, lw=2.2, label="Sender (segmentation outline)"), Line2D([], [], color=RED, lw=2.2, label="Receiver (segmentation outline)"),
-       Line2D([], [], color="white", lw=1.1, ls=(0, (3, 2)), label="Receiver's contacting cells")]
-ax.legend(handles=leg, loc="upper center", bbox_to_anchor=(0.5, -0.01), ncol=2, fontsize=7.6, frameon=True, facecolor="#000000", edgecolor="#555555", labelcolor=INK)
-ia = fig.add_axes([0.80, 0.43, 0.18, 0.36], facecolor="#0b0c10")
-rng_ = np.random.default_rng(0)
-def mci(v):
-    bs = [rng_.choice(v, len(v)).mean() for _ in range(2000)]; return v.mean(), np.percentile(bs, 2.5), np.percentile(bs, 97.5)
-for x_, v_, c_ in [(1, gscore[ctrl], "#9a9a9a"), (2, gscore[top_r], CORAL)]:
-    m_, lo_, hi_ = mci(v_); ia.bar(x_, m_, width=0.55, color=c_, alpha=0.85, edgecolor=INK)
-    ia.errorbar(x_, m_, yerr=[[m_ - lo_], [hi_ - m_]], color=INK, capsize=6, lw=1.4)
-ia.axhline(0, color="#777777", lw=0.8)
-ia.set_xticks([1, 2], [f"controls\n(n={len(ctrl):,})", "top-50\nreceivers"], color=INK, fontsize=8); ia.tick_params(colors=INK, labelsize=7.5)
-ia.set_ylabel("literature response-gene score (z), mean ± 95% CI", color=INK, fontsize=7.5)
-ia.set_title(f"one-sided Mann-Whitney p = {mw.pvalue:.2g}\nshown receiver: top {max(100 - pct, 1):.0f}% of its type", color=INK, fontsize=8)
-for s_ in ia.spines.values(): s_.set_color("#555555")
-top_pct = 100 * cs.rank_all / cs.n_events
-fmt_pct = lambda v: f"{v:.{max(0, -int(np.floor(np.log10(v))) + 1)}f}"
-fig.text(0.5, 0.99, f"Predicted CCC event (rank {cs.rank_all:,} of {cs.n_events:,}; top {fmt_pct(top_pct)}%): "
-         f"\n{'+'.join(lig_genes)} ({types[ctype[si]]}) → {'+'.join(rec_genes)} ({types[ctype[ri]]})", color=INK, ha="center", va="top", fontsize=12, fontweight="bold")
-fig.text(0.5, 0.925, f"{chn.split('->')[1].replace('_', '/')} → {relay or 'receiver response'}  |  CosMx breast RNA+protein, FOV {fov}\n"
-         f"literature response genes: {', '.join(up[:12])}{' …' if len(up) > 12 else ''}", color=MUTE, ha="center", va="top", fontsize=8.5)
-foot = (f"GraTICCS graph transformer, held-out FOVs (5-fold spatial cross-fitting, seed ensemble). Channel {chn}: decoy p = {cs.p:.3g}, q = {cs.q:.2f} "
-        f"(1 − q = {1 - cs.q:.2f}); best readout {cs.best_readout}. Sender-receiver distance {cs.dist_um:.1f} µm.\n"
-        f"Cell fill = per-cell mean immunofluorescence (red CD45, green PanCK, blue DAPI); transcripts drawn at their measured CosMx coordinates.\n"
-        f"Literature (836 curated records, exact {chn.replace('_', '/')} match; {len(lit['papers'])} papers): " + "; ".join(cites[:3]) +
-        ".\nResponse genes = receiver effectors reported as up-regulated in these papers and measured on the panel. Event shown = among the 50 best-ranked events" + (" with >=2 ligand and >=1 receptor transcripts" if os.environ.get("VIS", "1") == "1" else "") + ", the one whose receiver has the highest response-gene score;\nthe inset test uses the 50 best-ranked receivers without regard to response. Supportive, not causal, evidence.")
-fig.text(0.5, 0.012, foot, color=MUTE, ha="center", va="bottom", fontsize=7.2, wrap=True)
-fig.savefig(outp, dpi=220, facecolor=BG); print("saved", outp, "| n_up genes", len(up), "| MW p", mw.pvalue, "| receiver pct", round(pct))
-json.dump(dict(channel=chn, sender=cs.sender, receiver=cs.receiver, fov=fov, rank_all=int(cs.rank_all), n_events=int(cs.n_events), p=float(cs.p), q=float(cs.q),
-               best_readout=cs.best_readout, response_genes=up, n_resp_genes_local=int(n_dg), n_resp_tx_local=int(n_d), mw_p=float(mw.pvalue),
-               receiver_percentile=float(pct), citations=cites, relay=relay), open(Path(outp).with_suffix(".json"), "w"), indent=1)
+x0, y0 = cx - half * 0.93, cy - half * 0.93
+ax.plot([x0, x0 + 10 / UM], [y0, y0], color="#ffffff", lw=2.5, zorder=9, solid_capstyle="butt")
+ax.text(x0 + 5 / UM, y0 + half * 0.04, "10 µm", color=FG, ha="center", va="bottom", fontsize=7.5, zorder=9,
+        bbox=dict(boxstyle="square,pad=0.1", fc="#000000", ec="none"))
+ax.legend(handles=leg, loc="upper left", bbox_to_anchor=(0.0, -0.015), fontsize=7.2, frameon=False, handlelength=1.8, labelcolor=FG)
+fig.text(0.66, 0.135, "Cell fill: immunofluorescence\n(red CD45, green PanCK, blue DAPI)", fontsize=7.2, color=FG, va="top")
+fig.savefig(outp + "_A.png", dpi=300, facecolor=BGC, bbox_inches="tight", pad_inches=0.05); plt.close(fig)
+# ---------- panel B: dose-response
+if cls == "contact":
+    chdf = pd.DataFrame(json.load(open(D / "gt_channels.json"))["channels"]); ci = z["contact"] > 0
+    Lm, Rm, Y = z["L_mo"], z["R_mo"], np.c_[z["Yp"], z["Yr"]].astype(np.float64)
+    W = sp.csr_matrix((np.ones(ci.sum()), (z["dst"][ci], z["src"][ci])), shape=(n, n)); T = json.load(open(R / "G_real_s0" / "fold0_mo.json"))["targets"]
+else:
+    S = np.load(D / "gt_sec_inputs.npz"); chdf = pd.DataFrame(json.load(open(D / "gt_sec_channels.json"))["channels"])
+    Lm, Rm, Y = S["L"], S["R"], np.c_[S["Yp"], S["Yr"]].astype(np.float64)
+    W = sp.csr_matrix((np.exp(-S["dist"] / 15.0).astype(np.float64), (S["dst"], S["src"])), shape=(n, n)); T = json.load(open(R / "G2_sec_real_s0" / "fold0_mo.json"))["targets"]
+dens = np.asarray(W.sum(1)).ravel(); fovs = cells.fov.to_numpy(); t = T.index(RO)
+LMOD = "protein" if lig_is_prot else "RNA"
+qbin = lambda x, k: np.searchsorted(np.unique(np.quantile(x, np.linspace(0, 1, k + 1)[1:-1])), x, side="right")
+def curve(c):
+    m = np.flatnonzero(Rm[:, c] > 0)
+    g = pd.factorize(pd.Series(fovs[m]).astype(str) + "_" + pd.Series(ctype[m]).astype(str) + "_" + pd.Series(qbin(dens[m], 5)).astype(str)
+                     + "_" + pd.Series(qbin(Rm[m, c], 10)).astype(str))[0]
+    df = pd.DataFrame(dict(g=g, e=W[m] @ np.maximum(Lm[:, c], 0), y=Y[m, t])); df = df[df.groupby("g").g.transform("size") >= 5]
+    df["ue"] = df.groupby("g").e.rank(pct=True); df["uy"] = df.groupby("g").y.rank(pct=True) - 0.5
+    df["bin"] = np.minimum((df.ue * 10).astype(int), 9); return df.groupby("bin").uy.agg(["mean", "sem"]), len(df)
+creal = int(chdf.index[(chdf.name == chn) & ~chdf.decoy][0]); decs = list(chdf.index[chdf.decoy & (chdf.of == chn)])
+res = pd.read_csv(dr_path).set_index("channel").loc[chn]
+dc = pd.concat([curve(int(d))[0]["mean"].rename(i) for i, d in enumerate(decs)], axis=1)
+s_, nrec = curve(creal)
+fig, ax = plt.subplots(figsize=(3.4, 3.2)); fig.subplots_adjust(left=0.22, right=0.97, top=0.93, bottom=0.17)
+dc = dc * 100; s_ = s_ * 100
+ax.fill_between(dc.index + 1, dc.min(axis=1), dc.max(axis=1), color=BAND, alpha=0.9, lw=0, label=f"Decoy ligands, range ({len(decs)})")
+ax.plot(dc.index + 1, dc.mean(axis=1), color=GREY, lw=1.4, ls="--", label="Decoy ligands, mean")
+ax.errorbar(s_.index + 1, s_["mean"], yerr=s_["sem"], color=RED, lw=2.0, marker="o", ms=3.8, capsize=2, mec="#000000", mew=0.5, label=f"{LNAME} (real ligand)")
+ax.axhline(0, color=FG, lw=0.6, ls=":")
+ax.set_xticks(range(1, 11)); ax.set_xlim(0.5, 10.5)
+ax.set_xlabel(f"Neighboring {LNAME} {LMOD}\n(decile within matched group, low to high)"); ax.set_ylabel(f"Receiver {RO} protein\n(percentile points above matched-group median)")
+fig.text(0.01, 0.985, "B", fontsize=12, fontweight="bold", va="top", color=FG)
+ax.spines[["top", "right"]].set_visible(False)
+ax.legend(loc="upper left", fontsize=7, frameon=False, labelcolor=FG)
+ax.text(0.5, -0.27, f"rank correlation ρ = {res.rho:.3f}, q = {res.q:.3f}\ndecoy mean ρ = {res.decoy_mean:.3f}\n{'+'.join(rec_genes)}+ receivers, n = {nrec:,}",
+        transform=ax.transAxes, ha="center", va="top", fontsize=7)
+fig.savefig(outp + "_B.png", dpi=300, facecolor=BGC, bbox_inches="tight", pad_inches=0.05); plt.close(fig)
+json.dump(dict(channel=chn, sender=cs.sender, receiver=cs.receiver, sender_type=types[ctype[si]], receiver_type=types[ctype[ri]], fov=fov,
+               rank_shown=int(cs.rank_all), best_rank=int(ev.rank_all.min()), n_events=int(cs.n_events), dist_um=float(cs.dist_um),
+               receiver_readout_pct=float(pct_of("P_" + RO, ri)), ligand_protein=bool(lig_is_prot), receptor_protein=bool(rec_is_prot), n_receivers=nrec),
+          open(outp + ".json", "w"), indent=1)
+print("saved", outp)
